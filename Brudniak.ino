@@ -1,0 +1,244 @@
+//settings:
+#define FAR_MM_SQUARED		360000	//mm^2 where laser is off
+#define CLOSE_MM_SQUARED 	10000 	//mm^2 where laser is full on
+
+#define YAWN_LENGTH			3200
+
+#define AVG 				10		//rolling average of last x readings (helps smooth transition)
+#define LASER_PIN 			11		//what pin is the laser ttl on? //11
+
+
+//code:
+#include <Wire.h>
+#include "src/VL53L1X/VL53L1X.h"
+#include "src/RunningAverage/RunningAverage.h"
+#include "Laser.h"
+#include "Dispatch.h"
+
+
+VL53L1X sensor;
+RunningAverage avg=RunningAverage(AVG);
+Laser laser(LASER_PIN);
+
+//timing vars
+int updateSensorMillis=200;
+unsigned long lastSensorMillis;
+
+uint8_t updateSpeedMillis=0;//1000./60;
+unsigned long lastUpdateMillis=0;
+
+//dispatcher
+Dispatch dispatch=Dispatch();
+
+//states
+unsigned long msInState;
+int numInLoop;
+typedef enum State {
+	RESET,
+	IDLE,
+	GLITCH,
+	PREWAKE,
+	WAKE,
+	AWOKE,
+	BREATH,
+	BREATH_RUN,
+	RUN
+
+} State;
+ 
+State state=RESET;
+State lastState;
+
+
+
+void setup() {
+	delay(500);
+	Serial.begin(9600);
+	delay(250);
+	Wire.begin();
+	Wire.setClock(400000); // use 400 kHz I2C
+	randomSeed(analogRead(A0));
+	
+	
+
+	sensor.setTimeout(500);
+	
+	
+	if (!sensor.init()) {
+		Serial.println("Failed to detect and initialize sensor!");
+		while (1);
+	}
+  
+	// Use long distance mode and allow up to 50000 us (50 ms) for a measurement.
+	// You can change these settings to adjust the performance of the sensor, but
+	// the minimum timing budget is 20 ms for short distance mode and 33 ms for
+	// medium and long distance modes. See the VL53L1X datasheet for more
+	// information on range and timing limits.
+	sensor.setDistanceMode(VL53L1X::Long);
+	sensor.setMeasurementTimingBudget(50000);
+
+	// Start continuous readings at a rate of one measurement every 50 ms (the
+	// inter-measurement period). This period should be at least as long as the
+	// timing budget.
+	sensor.startContinuous(50);
+	delay(250);
+	Serial.begin("Lasers ----x Written for Steve Brudniak by Alan Watts");
+	
+	//laser.set(Laser::GLITCH_ON, millis(), 4000);
+	
+	//laser.setRate(0.5);
+	
+	setState(RESET,(char *)"RESET");
+}
+
+bool setState(State s, char *stateString) {
+	if ( s != lastState ) {
+		state=s;
+		Serial.print("State change: ");
+		Serial.print(stateString);
+		Serial.print(" (");
+		Serial.print(s);
+		Serial.println(")");
+		msInState=millis();
+		numInLoop=0;
+		lastState=s;
+		return(true);
+	} else {
+		return(false);
+	}
+		
+}
+
+void stateDispatch(unsigned long ms, int v) {
+	setState((State)v, ">");
+}
+
+void loop() {
+	unsigned long ms=millis();	 
+	
+	if ( (ms-lastSensorMillis) > updateSensorMillis ) {
+		sensor.read();
+		lastSensorMillis=ms;
+	}
+	
+	if ( (ms-lastUpdateMillis) > updateSpeedMillis ) {
+		dispatch.update(ms);
+		laser.update(ms);
+		
+		lastUpdateMillis=ms;
+	}
+	
+	avg.addValue(constrain(sensor.ranging_data.range_mm, 100, 600));
+	 
+	unsigned long a=avg.getFastAverage();
+	
+	
+	switch(state) {
+		case RESET: {
+			avg.clear();
+			avg.fillValue(600, AVG);
+		
+			//laser.set(Laser::BREATH, millis(), 2000);
+			
+			//laser.setRate(0.5);
+			laser.off();
+			
+			
+			setState(IDLE,(char *)"IDLE");
+			break;
+			
+		}	
+		
+		case IDLE: {
+			//waiting for someone, did they get in my zone?
+			//Serial.println(a);
+			if ( a < 150 ) {
+				setState(GLITCH,(char *)"GLITCH");
+			}
+			
+			//setState(IDLE,(char *)"IDLE");
+			
+			//Serial.println(a);
+//			laser.setRate(0.5);
+			
+			break;
+			
+		}	
+		case GLITCH: {
+			int glitchLengh=random(600,1200);
+			
+			laser.set(Laser::GLITCH_ON, ms, glitchLengh);
+			dispatch.setCallback(stateDispatch,glitchLengh+100,ms,PREWAKE);
+			setState(RUN,(char *)"RUN");
+			break;
+		}
+		
+		case PREWAKE: {
+			laser.off();
+		 
+			dispatch.setCallback(stateDispatch,YAWN_LENGTH/12,ms,WAKE);
+			setState(RUN,(char *)"RUN");
+			break;
+		}
+		
+		
+		case WAKE: {
+			laser.set(Laser::FADE_ON, millis(), YAWN_LENGTH, 0, 255);
+			 
+			dispatch.setCallback(stateDispatch,YAWN_LENGTH+100,ms,AWOKE);
+				
+			setState(RUN,(char *)"RUN");
+			break;
+		}
+		
+		case AWOKE: {
+			//slow the breathing down (need rate)
+			laser.set(Laser::BREATH, millis(), YAWN_LENGTH,0,1);
+			laser.setRate(1);
+			
+			dispatch.setCallback(stateDispatch,6000,ms,RESET);
+			
+			setState(RUN,(char *)"RUN");
+		}
+		
+		case RUN: {
+			//Serial.println("RUN");
+			break;
+		}
+		
+	}	 
+	 
+	 
+	 
+
+	//if ( sensor.ranging_data.range_mm < 150 ) {
+		 
+	//	if (laser.isOn() ) {
+			//Serial.println("*");
+	//		laser.set(Laser::GLITCH_OFF, ms, 4000);
+				
+	//	} else {
+	//		laser.set(Laser::GLITCH_ON, ms, 2000);
+	//	}
+	//}
+	
+	
+	
+	//unsigned long a=avg.getFastAverage();
+	//unsigned long a2=a*a;
+	 
+	//analogWrite(LASER_PIN, map(a2, CLOSE_MM_SQUARED, FAR_MM_SQUARED, 255, 0));
+  	
+  
+	/*
+	Serial.print("range: ");
+	Serial.print(sensor.ranging_data.range_mm);
+	Serial.print("\tstatus: ");
+	Serial.print(VL53L1X::rangeStatusToString(sensor.ranging_data.range_status));
+	Serial.print("\tpeak signal: ");
+	Serial.print(sensor.ranging_data.peak_signal_count_rate_MCPS);
+	Serial.print("\tambient: ");
+	Serial.print(sensor.ranging_data.ambient_count_rate_MCPS);
+
+	Serial.println();*/
+}
