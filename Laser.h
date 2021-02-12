@@ -19,6 +19,7 @@ class Laser {
 			TURN_OFF,
 			TURN_ON,
 			FADE_ON,
+			FADE_OFF,
 			BLINK,
 			BLINK_X_TIMES,
 			BLINK_X_TIMES_ON,
@@ -40,6 +41,8 @@ class Laser {
 		
 		void endBlink();
 		
+		float breathLevel;
+		
 		void set(byte, unsigned long, uint16_t, uint16_t, uint16_t);
 		void set(byte, unsigned long, uint16_t, uint16_t=0);
 		void set(byte);
@@ -48,6 +51,8 @@ class Laser {
 		void PWM(uint8_t);
 		byte get();
 		bool setRate(float);
+		void setBrightness(uint8_t);
+		
 	private:
 		unsigned long _lastMillis;
 		uint8_t _pin;
@@ -58,6 +63,7 @@ class Laser {
 		unsigned long _v2;
 		unsigned long _v3;
 		float _rate;
+		float _brightness;
 		
 		bool _state;
 		Blink_State _blinkState;

@@ -1,6 +1,6 @@
 #include "Laser.h"
+#include "settings.h"
 
-extern float waves[6][120];
 
 Laser::Laser(uint8_t p) {
 	_state=0;
@@ -8,6 +8,7 @@ Laser::Laser(uint8_t p) {
 	pinMode(_pin, OUTPUT);
 	
 	_blinkState=Blink_State::BLINK_OFF;
+	setBrightness(255);
 	set(Laser::TURN_OFF);
 	
 	
@@ -15,8 +16,12 @@ Laser::Laser(uint8_t p) {
 }
 
 void Laser::PWM(uint8_t v) {
+Serial.print(v);
+Serial.print(":");
 	_state=v;
-	analogWrite(_pin,v*255);
+	analogWrite(_pin,v*(255*_brightness));
+	Serial.println(_brightness);
+	Serial.println(v*(255*_brightness));
 	
 }
 void Laser::off() {
@@ -90,13 +95,20 @@ void Laser::endBlink() {
 }
 
 bool Laser::setRate(float r) {
+	
 	bool changed=false;
 	if ( _rate != r ) changed=true;
 	_rate=r;
+	if ( changed ) Serial.println(r);
 	return(changed);
 //	rate=1;
 }
 
+void Laser::setBrightness(uint8_t b) {
+	//0-255 becomes 0 - 1
+	//Serial.println(b);
+	_brightness=b/255.;
+}
 
 void Laser::update(unsigned long ms) {
 	if ( _ms > ms ) _ms = ms;
@@ -104,7 +116,9 @@ void Laser::update(unsigned long ms) {
 	
 	switch (_effect) {
 		case Laser::TURN_OFF: {
+			 
 			PWM(0);
+			_effect=Laser::NOTHING;
 			break;
 		}
 		case Laser::TURN_ON: {
@@ -113,12 +127,11 @@ void Laser::update(unsigned long ms) {
 		}
 		
 		case Laser::FADE_ON: {
-			unsigned long millisSinceStart=max(1,(ms-_ms));
-			
+			unsigned long millisSinceStart=constrain((ms-_ms),0,_v1);
+		//	Serial.println(millisSinceStart);
 			if ( millisSinceStart <= _v1 ) {
-				
-				float perc=(millisSinceStart%_ms)/(float)_v1;
-				analogWrite(_pin,perc*255);
+				float perc=(millisSinceStart)/(float)_v1;
+				analogWrite(_pin,perc*(255*_brightness));
 				
 			} else {
 				on();
@@ -129,17 +142,32 @@ void Laser::update(unsigned long ms) {
 		
 		}
 		
+		case Laser::FADE_OFF: {
+			//unsigned long millisSinceStart=max(1,(ms-_ms));
+			unsigned long millisSinceStart=constrain((ms-_ms),0,_v1);
+			
+			if ( millisSinceStart <= _v1 ) {
+				
+				float perc=(millisSinceStart%_ms)/(float)_v1;
+				analogWrite(_pin,(1-perc)*(255*_brightness));
+				
+			} else {
+				on();
+			}
+			
+			break;
+			
+		
+		}
 		
 		case Laser::BREATH:{
 
 			if ( _v3 == 1 ) {
 				_perc=(_perc + (_rate*elapsed));
-				//_perc=_perc/1.5;
-				 
 			} else {
 				_perc=(_perc - ((_rate*1.6)*elapsed));
-				//_perc=_perc*1;
 			}
+	 
 	 
 			if ( _perc > 1 ) {
 				_v3 = 0;
@@ -149,27 +177,26 @@ void Laser::update(unsigned long ms) {
 				_perc=0;
 			} 
 	
-			//			=((ms-_ms)%_ms)/(float)_ms;
-				
-		//	float sinp=sin(_perc/1.5*M_PI_2);
-			float sinp=sin((_perc/2)*M_PI_2);
-				
+			breathLevel=sin((_perc/2)*M_PI_2);
 			 
-			analogWrite(_pin,(1-sinp)*255);
+			analogWrite(_pin,(1-breathLevel)*(255*_brightness));
 		
 			break;
 		
 		
 		}
-		case Laser::GLITCH_ON: {
-			unsigned long millisSinceStart=max(1,(ms-_ms));
+		
+		case Laser::GLITCH_OFF: {
+			//unsigned long millisSinceStart=max(1,(ms-_ms));
+			unsigned long millisSinceStart=constrain((ms-_ms),0,_v1);
 			if ( millisSinceStart <= _v1 ) {
 				
 				if ( _blinkState==BLINK_OFF ) {
-					if ( ms-_v2 > random(60,_v1-millisSinceStart)) {
-						float perc=millisSinceStart/(float)_v1;
+					
+					if ( ms-_v2 > random(20,millisSinceStart)) {
+						float perc=1-(millisSinceStart/(float)_v1);
 						float r=random(0,__INT_MAX__)/(float)__INT_MAX__;
-
+						setBrightness(GLITCH_BRIGHTNESS*perc);
 						if ( perc > r ) {
 							PWM(1);
 							_blinkState=BLINK_ON;
@@ -178,7 +205,41 @@ void Laser::update(unsigned long ms) {
 					}
 				} else {
 					//on, should we turn off yet?
-					if ( ms-_v2 > random(30,70)) {
+					if ( ms-_v2 > random(50,90)) {
+						PWM(0);
+						_blinkState=BLINK_OFF;
+						_v2=ms;
+					}
+				}
+			} else {
+				on();
+			}
+	
+			break;
+		}
+		
+		case Laser::GLITCH_ON: {
+			Serial.println("#");
+			//unsigned long millisSinceStart=max(1,(ms-_ms));
+			unsigned long millisSinceStart=constrain((ms-_ms),0,_v1);
+			if ( millisSinceStart <= _v1 ) {
+				
+				if ( _blinkState==BLINK_OFF ) {
+					if ( ms-_v2 > random(20,_v1-millisSinceStart)) {
+						float perc=millisSinceStart/(float)_v1;
+						float r=random(0,__INT_MAX__)/(float)__INT_MAX__;
+						Serial.print("*");
+						Serial.println(perc);
+						setBrightness(GLITCH_BRIGHTNESS*perc);
+						if ( perc > (r/3) ) {
+							PWM(1);
+							_blinkState=BLINK_ON;
+						}
+						_v2=ms;
+					}
+				} else {
+					//on, should we turn off yet?
+					if ( ms-_v2 > random(50,90)) {
 						PWM(0);
 						_blinkState=BLINK_OFF;
 						_v2=ms;
@@ -278,7 +339,7 @@ void Laser::update(unsigned long ms) {
 					
 			break;
 		}
-		case Laser::GLITCH_OFF: {
+		/*case Laser::GLITCH_OFF: {
  
 			uint16_t millisSinceStart=max(1,(ms-_ms));
 			
@@ -310,7 +371,7 @@ void Laser::update(unsigned long ms) {
 			
 			break;
 			
-		}
+		}*/
 			
 		case Laser::BLINK: {
 			if ( _state == 1 ) { //is on

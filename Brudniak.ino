@@ -1,11 +1,5 @@
 //settings:
-#define FAR_MM_SQUARED		360000	//mm^2 where laser is off
-#define CLOSE_MM_SQUARED 	10000 	//mm^2 where laser is full on
-
-#define YAWN_LENGTH			3200
-
-#define AVG 				10		//rolling average of last x readings (helps smooth transition)
-#define LASER_PIN 			11		//what pin is the laser ttl on? //11
+#include "settings.h"
 
 
 //code:
@@ -21,7 +15,7 @@ RunningAverage avg=RunningAverage(AVG);
 Laser laser(LASER_PIN);
 
 //timing vars
-int updateSensorMillis=200;
+int updateSensorMillis=0;
 unsigned long lastSensorMillis;
 
 uint8_t updateSpeedMillis=0;//1000./60;
@@ -36,10 +30,15 @@ int numInLoop;
 typedef enum State {
 	RESET,
 	IDLE,
-	GLITCH,
+	GLITCH_ON,
 	PREWAKE,
 	WAKE,
+	WAKE_RUN,
 	AWOKE,
+	LURING,
+	LAST_GASP_WAIT,
+	LAST_GASP,
+	GLITCH_OFF,
 	BREATH,
 	BREATH_RUN,
 	RUN
@@ -58,7 +57,6 @@ void setup() {
 	Wire.begin();
 	Wire.setClock(400000); // use 400 kHz I2C
 	randomSeed(analogRead(A0));
-	
 	
 
 	sensor.setTimeout(500);
@@ -113,22 +111,28 @@ void stateDispatch(unsigned long ms, int v) {
 	setState((State)v, ">");
 }
 
+float mapFloat(float x, float in_min, float in_max, float out_min, float out_max) {
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+
+bool leaving=false;
+
 void loop() {
 	unsigned long ms=millis();	 
 	
-	if ( (ms-lastSensorMillis) > updateSensorMillis ) {
-		sensor.read();
-		lastSensorMillis=ms;
-	}
+	//if ( (ms-lastSensorMillis) > updateSensorMillis ) {
+	sensor.read();
+	//	lastSensorMillis=ms;
+	//}
 	
-	if ( (ms-lastUpdateMillis) > updateSpeedMillis ) {
-		dispatch.update(ms);
-		laser.update(ms);
+	//if ( (ms-lastUpdateMillis) > updateSpeedMillis ) {
+	dispatch.update(ms);
 		
-		lastUpdateMillis=ms;
-	}
+		//lastUpdateMillis=ms;
+	//}
 	
-	avg.addValue(constrain(sensor.ranging_data.range_mm, 100, 600));
+	avg.addValue(constrain(sensor.ranging_data.range_mm, CLOSEST_MM, FAR_MM));
 	 
 	unsigned long a=avg.getFastAverage();
 	
@@ -136,14 +140,10 @@ void loop() {
 	switch(state) {
 		case RESET: {
 			avg.clear();
-			avg.fillValue(600, AVG);
-		
-			//laser.set(Laser::BREATH, millis(), 2000);
+			avg.fillValue(FAR_MM, AVG);
+			leaving=false;
 			
-			//laser.setRate(0.5);
 			laser.off();
-			
-			
 			setState(IDLE,(char *)"IDLE");
 			break;
 			
@@ -151,55 +151,125 @@ void loop() {
 		
 		case IDLE: {
 			//waiting for someone, did they get in my zone?
-			//Serial.println(a);
-			if ( a < 150 ) {
-				setState(GLITCH,(char *)"GLITCH");
+			if ( a < FAR_MM ) {
+				setState(GLITCH_ON,(char *)"GLITCH_ON");
 			}
-			
-			//setState(IDLE,(char *)"IDLE");
-			
-			//Serial.println(a);
-//			laser.setRate(0.5);
 			
 			break;
 			
 		}	
-		case GLITCH: {
+		case GLITCH_ON: {
 			int glitchLengh=random(600,1200);
+			//laser.setBrightness( GLITCH_BRIGHTNESS );
 			
-			laser.set(Laser::GLITCH_ON, ms, glitchLengh);
-			dispatch.setCallback(stateDispatch,glitchLengh+100,ms,PREWAKE);
+			laser.set(Laser::GLITCH_ON, ms, glitchLengh,0,0);
+			dispatch.setCallback(stateDispatch,glitchLengh,ms,PREWAKE);
 			setState(RUN,(char *)"RUN");
 			break;
 		}
 		
 		case PREWAKE: {
 			laser.off();
-		 
-			dispatch.setCallback(stateDispatch,YAWN_LENGTH/12,ms,WAKE);
-			setState(RUN,(char *)"RUN");
+		 	 
+			//dispatch.setCallback(stateDispatch,YAWN_LENGTH/5,ms,WAKE);
+			setState(WAKE,(char *)"WAKE");
 			break;
 		}
 		
 		
 		case WAKE: {
-			laser.set(Laser::FADE_ON, millis(), YAWN_LENGTH, 0, 255);
+			float wakeSpeed = 1000/(mapFloat(a*a, CLOSE_MM_SQUARED, FAR_MM_SQUARED, BREATH_MAX, BREATH_MIN));
+			
+			laser.set(Laser::FADE_ON, ms, wakeSpeed, 0, 255);
 			 
-			dispatch.setCallback(stateDispatch,YAWN_LENGTH+100,ms,AWOKE);
+			dispatch.setCallback(stateDispatch,wakeSpeed+100,ms,AWOKE);
 				
+			setState(WAKE_RUN,(char *)"WAKE_RUN");
+			break;
+		}
+		
+		case WAKE_RUN: {
+			laser.setBrightness( map(a*a, CLOSE_MM_SQUARED, FAR_MM_SQUARED, BRIGHTNESS_MAX, BRIGHTNESS_MIN));
+			break;
+			
+		}
+		case AWOKE: {
+			//slow the breathing down (need rate)
+			laser.set(Laser::BREATH, ms, YAWN_LENGTH,0,1);
+			laser.setRate(0.5);
+			
+			//dispatch.setCallback(stateDispatch,6000,ms,GLITCH_OFF);
+			
+			setState(LURING,(char *)"LURING");
+			break;
+			
+		}
+		
+		case LURING: {
+			//normal running, get distance and change rate/brightness
+			
+			
+			if ( a >= FAR_MM && ! dispatch.isRunning) {
+				leaving=true;
+				
+				if ( ms-msInState > MIN_LURING_MS ) {
+					setState(GLITCH_OFF,(char *)"GLITCH_OFF");
+				} else {
+					dispatch.setCallback(stateDispatch, MIN_LURING_MS-(ms-msInState), ms, GLITCH_OFF);
+				}
+			 
+			}
+			
+			if ( !leaving ) {
+			 
+				laser.setBrightness( map(a*a, CLOSE_MM_SQUARED, FAR_MM_SQUARED, BRIGHTNESS_MAX, BRIGHTNESS_MIN));
+				laser.setRate( mapFloat(a*a, CLOSE_MM_SQUARED, FAR_MM_SQUARED, BREATH_MAX, BREATH_MIN));
+			}
+			 
+			break;
+		}
+		
+		case LAST_GASP_WAIT: {
+			
+			//laser.setBrightness( map(a*a, CLOSE_MM_SQUARED, FAR_MM_SQUARED, BRIGHTNESS_MAX, BRIGHTNESS_MIN));
+			//laser.setRate( mapFloat(a*a, CLOSE_MM_SQUARED, FAR_MM_SQUARED, BREATH_MAX, BREATH_MIN));
+			
+			
+			//wait for it's final inhale, for slow exhale, then glitch off
+			if ( laser.breathLevel == 0 ) {
+				//do it!
+				Serial.println("--");
+				setState(LAST_GASP,(char *)"LAST_GASP");
+			}
+			
+			break;
+		}
+		
+		case LAST_GASP: {
+			//laser.setBrightness( map(a*a, CLOSE_MM_SQUARED, FAR_MM_SQUARED, BRIGHTNESS_MAX, BRIGHTNESS_MIN));
+			//laser.setRate( 1000./ LAST_GASP_LENGTH );
+			laser.set(Laser::FADE_OFF, ms, LAST_GASP_LENGTH, 0, 255);
+			
+			
+			dispatch.setCallback(stateDispatch, LAST_GASP_LENGTH, ms, GLITCH_OFF);
 			setState(RUN,(char *)"RUN");
 			break;
 		}
 		
-		case AWOKE: {
-			//slow the breathing down (need rate)
-			laser.set(Laser::BREATH, millis(), YAWN_LENGTH,0,1);
-			laser.setRate(1);
+		
+		
+		case GLITCH_OFF: {
+			//normal running, get distance and change rate/brightness
+			int glitchLengh=random(1600,2200);
+			//laser.setBrightness( GLITCH_BRIGHTNESS );
 			
-			dispatch.setCallback(stateDispatch,6000,ms,RESET);
-			
+			laser.set(Laser::GLITCH_OFF, ms, glitchLengh);
+			dispatch.setCallback(stateDispatch,glitchLengh+100,ms,RESET);
 			setState(RUN,(char *)"RUN");
+			break;
+			
 		}
+		
 		
 		case RUN: {
 			//Serial.println("RUN");
@@ -209,7 +279,8 @@ void loop() {
 	}	 
 	 
 	 
-	 
+	laser.update(ms);
+	
 
 	//if ( sensor.ranging_data.range_mm < 150 ) {
 		 
