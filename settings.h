@@ -1,9 +1,9 @@
 //settings:
-#define FAR_MM				300
-#define CLOSEST_MM			100
+#define FAR_MM				1850	//1' = 305mm
+#define CLOSEST_MM			305
 
-#define FAR_MM_SQUARED		90000	//mm^2 where laser is off
-#define CLOSE_MM_SQUARED 	10000 	//mm^2 where laser is full on
+#define FAR_MM_SQUARED		3422500	//mm^2 where laser is off
+#define CLOSE_MM_SQUARED 	93025 	//mm^2 where laser is full on
 
 #define GLITCH_BRIGHTNESS	100		//0-255
 #define BRIGHTNESS_MAX		255		//brightness when you're up in its business
@@ -18,5 +18,5 @@
 
 #define YAWN_LENGTH			4200	//milliseconds of its post-glitch fade up
 
-#define AVG 				3		//rolling average of last x readings (helps smooth transition)
+#define AVG 				10		//rolling average of last x readings (helps smooth transition)
 #define LASER_PIN 			11		//what pin is the laser ttl on? //11

@@ -127,7 +127,6 @@ void loop() {
 	//}
 	
 	//if ( (ms-lastUpdateMillis) > updateSpeedMillis ) {
-	dispatch.update(ms);
 		
 		//lastUpdateMillis=ms;
 	//}
@@ -278,6 +277,7 @@ void loop() {
 		
 	}	 
 	 
+	dispatch.update(ms);
 	 
 	laser.update(ms);
 	
