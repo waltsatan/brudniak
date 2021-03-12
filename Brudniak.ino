@@ -4,7 +4,9 @@
 
 //code:
 #include <Wire.h>
-#include "src/VL53L1X/VL53L1X.h"
+//#include "src/VL53L1X/VL53L1X.h"
+#include <VL53L1X.h>
+
 #include "src/RunningAverage/RunningAverage.h"
 #include "Laser.h"
 #include "Dispatch.h"
@@ -15,7 +17,7 @@ RunningAverage avg=RunningAverage(AVG);
 Laser laser(LASER_PIN);
 
 //timing vars
-int updateSensorMillis=0;
+int updateSensorMillis=250;
 unsigned long lastSensorMillis;
 
 uint8_t updateSpeedMillis=0;//1000./60;
@@ -51,41 +53,36 @@ State lastState;
 
 
 void setup() {
-	delay(500);
+	pinMode(13, OUTPUT);
+	 
 	Serial.begin(9600);
 	delay(250);
+	 
+	
+	//Serial.println("Lasers ----x Written for Steve Brudniak by Alan Watts");
+	 
 	Wire.begin();
 	Wire.setClock(400000); // use 400 kHz I2C
 	randomSeed(analogRead(A0));
-	
-
+	 
 	sensor.setTimeout(500);
 	
-	
+	 
 	if (!sensor.init()) {
+		 
 		Serial.println("Failed to detect and initialize sensor!");
-		while (1);
+		
+		while (1) {
+				digitalWrite(13, !digitalRead(13));
+				delay(100);	
+		}
 	}
-  
-	// Use long distance mode and allow up to 50000 us (50 ms) for a measurement.
-	// You can change these settings to adjust the performance of the sensor, but
-	// the minimum timing budget is 20 ms for short distance mode and 33 ms for
-	// medium and long distance modes. See the VL53L1X datasheet for more
-	// information on range and timing limits.
+	
+  	delay(250);
+
 	sensor.setDistanceMode(VL53L1X::Long);
 	sensor.setMeasurementTimingBudget(50000);
-
-	// Start continuous readings at a rate of one measurement every 50 ms (the
-	// inter-measurement period). This period should be at least as long as the
-	// timing budget.
 	sensor.startContinuous(50);
-	delay(250);
-	Serial.begin("Lasers ----x Written for Steve Brudniak by Alan Watts");
-	
-	//laser.set(Laser::GLITCH_ON, millis(), 4000);
-	
-	//laser.setRate(0.5);
-	
 	setState(RESET,(char *)"RESET");
 }
 
@@ -117,22 +114,34 @@ float mapFloat(float x, float in_min, float in_max, float out_min, float out_max
 
 
 bool leaving=false;
+//uint16_t distance;
+unsigned long distance=__INT_MAX__;
 
 void loop() {
 	unsigned long ms=millis();	 
-	
-	//if ( (ms-lastSensorMillis) > updateSensorMillis ) {
 	sensor.read();
-	//	lastSensorMillis=ms;
-	//}
 	
-	//if ( (ms-lastUpdateMillis) > updateSpeedMillis ) {
+	if ( sensor.ranging_data.range_status != 2 ) {
 		
-		//lastUpdateMillis=ms;
-	//}
-	
-	avg.addValue(constrain(sensor.ranging_data.range_mm, CLOSEST_MM, FAR_MM));
-	 
+		distance=constrain(sensor.ranging_data.range_mm, CLOSEST_MM, FAR_MM);
+		Serial.print("+");
+	} else {
+		distance=__INT_MAX__;
+		
+ 		//avg.addValue(65535);
+	}
+ 
+	Serial.print(sensor.ranging_data.range_mm);
+	Serial.print("\tstatus: ");
+	Serial.print(VL53L1X::rangeStatusToString(sensor.ranging_data.range_status));
+	Serial.print("\tpeak signal: ");
+	Serial.print(sensor.ranging_data.peak_signal_count_rate_MCPS);
+	Serial.print("\tambient: ");
+	Serial.print(sensor.ranging_data.ambient_count_rate_MCPS);
+	Serial.print("\v: ");
+	Serial.print(distance);
+	Serial.println();
+	avg.addValue(distance); 
 	unsigned long a=avg.getFastAverage();
 	
 	
@@ -299,7 +308,13 @@ void loop() {
 	//unsigned long a2=a*a;
 	 
 	//analogWrite(LASER_PIN, map(a2, CLOSE_MM_SQUARED, FAR_MM_SQUARED, 255, 0));
-  	
+  	//if ( (ms-lastSensorMillis) > updateSensorMillis ) {
+//		digitalWrite(13, 1);
+		//noInterrupts();
+	//	digitalWrite(13, 0);
+		// uint16_t distance = sensor.readRangeContinuousMillimeters();
+		  
+		////  if (sensor.timeoutOccurred()) { Serial.print(" TIMEOUT"); }
   
 	/*
 	Serial.print("range: ");

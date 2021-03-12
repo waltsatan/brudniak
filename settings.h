@@ -10,7 +10,7 @@
 #define BRIGHTNESS_MIN		20		//brightness when you're 6 feet away
 
 #define BREATH_MAX			0.4		//rate when you're on it
-#define BREATH_MIN			1.0		//how fast the breathing is when you're 6 feet away
+#define BREATH_MIN			2.0		//how fast the breathing is when you're 6 feet away
 
 #define MIN_LURING_MS		6000	//always do this amount even if the person steps out
 
